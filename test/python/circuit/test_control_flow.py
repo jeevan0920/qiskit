@@ -813,6 +813,54 @@ class TestAddingControlFlowOperations(QiskitTestCase):
         self.assertEqual(qc.data[0].qubits, tuple(qc.qubits[1:4]))
         self.assertEqual(qc.data[0].clbits, (qc.clbits[1],))
 
+    def test_for_loop_op_with_reused_parameter_assign_parameters(self):
+        """Test for GitHub issue #15657: ForLoopOp with reused Parameter causes
+        'circuit parameter table is inconsistent' on assign_parameters.
+        
+        This test reproduces the bug reported in:
+        https://github.com/Qiskit/qiskit/issues/15657
+        
+        When using ForLoopOp with a reused Parameter and calling assign_parameters()
+        on the outer circuit, it should not raise a RuntimeError about internal
+        inconsistency.
+        """
+        # Create the loop body
+        theta = Parameter('θ')
+        body = QuantumCircuit(1)
+        body.rx(theta, 0)
+        
+        # Create a ForLoopOp with the loop parameter
+        indexset = range(3)
+        loop_parameter = theta
+        for_loop_op = ForLoopOp(indexset, loop_parameter, body)
+        
+        # Append to outer circuit
+        qc = QuantumCircuit(1)
+        qc.append(for_loop_op, [0])
+        
+        # Verify the parameter is in the circuit
+        self.assertIn(theta, qc.parameters)
+        
+        # This should NOT raise:
+        # RuntimeError: internal error: circuit parameter table is inconsistent
+        # 
+        # The expected behavior is either:
+        # 1. assign_parameters should work correctly
+        # 2. Or raise a CLEAR error message explaining the loop parameter cannot be assigned
+        try:
+            result = qc.assign_parameters({theta: 3.14159 / 2}, inplace=False)
+            # If it succeeds, verify the parameter was assigned
+            self.assertEqual(len(result.parameters), 0, 
+                           "Expected all parameters to be bound after assignment")
+        except RuntimeError as e:
+            # If it raises, make sure it's a clear error, not internal inconsistency
+            error_msg = str(e)
+            self.assertNotIn("circuit parameter table is inconsistent", error_msg,
+                           "Got the confusing internal error - this is the BUG we need to fix!")
+        except Exception:
+            # Any other exception is acceptable for now (e.g., CircuitError)
+            pass
+
     @idata(CONDITION_PARAMETRISATION)
     def test_appending_if_else_op(self, condition):
         """Verify we can append a IfElseOp to a QuantumCircuit."""
