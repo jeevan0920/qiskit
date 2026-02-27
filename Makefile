@@ -14,9 +14,58 @@ ifneq ($(OS), Windows_NT)
 	OS := $(shell uname -s)
 endif
 
-.PHONY: default ruff env lint lint-incr style black test test_randomized pytest pytest_randomized test_ci coverage coverage_erase clean
+.PHONY: default ruff env lint lint-incr style black test test_randomized pytest pytest_randomized test_ci coverage coverage_erase clean \
+        docker-build docker-run docker-shell docker-test docker-test-rust docker-clean docker-logs docker-stop docker-rebuild-rust docker-full-test docker-help help
 
 default: ruff style lint-incr test ;
+
+# Display help information
+help:
+	@echo "Qiskit Development Targets:"
+	@echo ""
+	@echo "Python code quality:"
+	@echo "  make lint              - Run pylint and verify headers"
+	@echo "  make lint-incr         - Run pylint on changed files only"
+	@echo "  make ruff              - Run ruff linter"
+	@echo "  make style             - Check code style with black"
+	@echo "  make black             - Apply black formatting"
+	@echo ""
+	@echo "Testing:"
+	@echo "  make test              - Run Python unit tests"
+	@echo "  make test_ci           - Run tests for CI"
+	@echo "  make test_randomized   - Run randomized tests"
+	@echo "  make pytest            - Run tests with pytest"
+	@echo "  make pytest_randomized - Run randomized pytest tests"
+	@echo "  make coverage          - Generate coverage report"
+	@echo "  make coverage_erase    - Erase coverage data"
+	@echo ""
+	@echo "C API:"
+	@echo "  make c                 - Build C extension"
+	@echo "  make cheader           - Build C header files"
+	@echo "  make clib              - Build C library"
+	@echo "  make ctest             - Run C tests"
+	@echo "  make cformat           - Check C code formatting"
+	@echo "  make fix_cformat       - Fix C code formatting"
+	@echo "  make ccoverage         - Generate C code coverage"
+	@echo "  make cclean            - Clean C build artifacts"
+	@echo ""
+	@echo "Docker Development (for Rust components):"
+	@echo "  make docker-build      - Build Docker development image"
+	@echo "  make docker-run        - Start Docker container"
+	@echo "  make docker-shell      - Enter interactive shell"
+	@echo "  make docker-rebuild-rust - Rebuild Rust after changes"
+	@echo "  make docker-test       - Run Python tests"
+	@echo "  make docker-test-rust  - Run Rust tests"
+	@echo "  make docker-logs       - View container logs"
+	@echo "  make docker-stop       - Stop the container"
+	@echo "  make docker-clean      - Remove all Docker resources"
+	@echo "  make docker-full-test  - Full build + test cycle"
+	@echo "  make docker-help       - Show Docker-specific help"
+	@echo ""
+	@echo "Environment:"
+	@echo "  make env               - Set up Anaconda environment"
+	@echo "  make clean             - Clean all build artifacts"
+	@echo ""
 
 # Dependencies need to be installed on the Anaconda virtual environment.
 env:
@@ -218,3 +267,93 @@ ccoverage: ctest
 cclean:
 	rm -rf $(C_DIR_OUT) $(C_DIR_TEST_BUILD) $(C_INCLUDE_FILES_ABS_GENERATED)
 	cargo clean --package qiskit-cext
+
+# ==============================================================================
+# Docker Development Targets
+# ==============================================================================
+# These targets simplify development workflow when working with Rust components.
+# They ensure consistent Python (3.12) and Rust toolchain versions across
+# all developers' machines.
+
+.PHONY: docker-build docker-run docker-shell docker-test docker-test-rust \
+        docker-clean docker-logs docker-stop docker-rebuild-rust docker-full-test \
+        docker-help
+
+# Build the Docker development image
+docker-build:
+	@echo "Building Qiskit development Docker image..."
+	docker-compose -f docker-compose.dev.yml build --no-cache qiskit-dev
+
+# Start the Docker container in background
+docker-run:
+	@echo "Starting Qiskit development container..."
+	docker-compose -f docker-compose.dev.yml up -d qiskit-dev
+
+# Interactive shell in the container
+docker-shell: docker-run
+	@echo "Entering Qiskit development container (Python 3.12)..."
+	docker-compose -f docker-compose.dev.yml exec qiskit-dev /bin/bash
+
+# Rebuild Rust components inside container
+docker-rebuild-rust:
+	@echo "Rebuilding Rust components in container..."
+	docker-compose -f docker-compose.dev.yml exec qiskit-dev \
+		python setup.py build_rust --inplace --release
+
+# Run specific Python test inside container
+docker-test: docker-rebuild-rust
+	@echo "Running Python tests in container..."
+	docker-compose -f docker-compose.dev.yml exec qiskit-dev \
+		tox --skip-pkg-install -epy312 -- test.python.circuit.test_control_flow.TestAddingControlFlowOperations.test_for_loop_op_with_reused_parameter_assign_parameters
+
+# Run Rust tests inside container
+docker-test-rust: docker-rebuild-rust
+	@echo "Running Rust tests in container..."
+	docker-compose -f docker-compose.dev.yml exec qiskit-dev \
+		tox --skip-pkg-install -erust
+
+# View container logs
+docker-logs:
+	docker-compose -f docker-compose.dev.yml logs -f qiskit-dev
+
+# Stop the container
+docker-stop:
+	docker-compose -f docker-compose.dev.yml down
+
+# Clean everything (remove container and image)
+docker-clean: docker-stop
+	@echo "Cleaning Docker resources..."
+	docker-compose -f docker-compose.dev.yml down -v
+	docker rmi qiskit-qiskit-dev 2>/dev/null || true
+
+# All-in-one: build + run + test
+docker-full-test: docker-build docker-run docker-test
+	@echo "✅ Docker full test cycle complete!"
+
+# Docker help
+docker-help:
+	@echo "Qiskit Docker Development Targets:"
+	@echo ""
+	@echo "Getting started:"
+	@echo "  make docker-build       - Build Docker development image (first time only)"
+	@echo "  make docker-run         - Start Docker container in background"
+	@echo "  make docker-shell       - Enter interactive shell in container"
+	@echo ""
+	@echo "Building and testing (inside container):"
+	@echo "  make docker-rebuild-rust - Rebuild Rust components (after editing .rs files)"
+	@echo "  make docker-test        - Run Python tests"
+	@echo "  make docker-test-rust   - Run Rust tests"
+	@echo ""
+	@echo "Container management:"
+	@echo "  make docker-logs        - View container logs"
+	@echo "  make docker-stop        - Stop the container"
+	@echo "  make docker-clean       - Remove all Docker resources"
+	@echo "  make docker-full-test   - Full build + run + test cycle"
+	@echo ""
+	@echo "Quick workflow:"
+	@echo "  1. make docker-build"
+	@echo "  2. make docker-shell"
+	@echo "  3. Edit code on your host machine"
+	@echo "  4. Inside container: python setup.py build_rust --inplace --release"
+	@echo "  5. Inside container: tox --skip-pkg-install -epy312 -- <test>"
+	@echo "  6. make docker-stop (when done)"

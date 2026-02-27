@@ -1,0 +1,51 @@
+# This code is part of Qiskit.
+#
+# (C) Copyright IBM 2024.
+#
+# This code is licensed under the Apache License, Version 2.0. You may
+# obtain a copy of this license in the LICENSE.txt file in the root directory
+# of this source tree or at https://www.apache.org/licenses/LICENSE-2.0.
+#
+# Any modifications or derivative works of this code must retain this
+# copyright notice, and modified files need to carry a notice indicating
+# that they have been altered from the originals.
+
+services:
+  qiskit-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: qiskit-dev
+    
+    # Mount your local code
+    volumes:
+      - .:/workspace
+      - /workspace/.git
+      - /workspace/__pycache__
+      - /workspace/.tox
+      - /workspace/target
+      - /workspace/.cargo
+    
+    # Interactive terminal
+    stdin_open: true
+    tty: true
+    
+    # Environment variables
+    environment:
+      - QISKIT_BUILD_PROFILE=release
+      - RUST_BACKTRACE=full
+      - QISKIT_TEST_CAPTURE_STREAMS=0
+      - PYTHONUNBUFFERED=1
+    
+    # Keep running
+    command: /bin/bash
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G

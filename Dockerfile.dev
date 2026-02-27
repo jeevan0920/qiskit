@@ -1,0 +1,44 @@
+# This code is part of Qiskit.
+#
+# (C) Copyright IBM 2024.
+#
+# This code is licensed under the Apache License, Version 2.0. You may
+# obtain a copy of this license in the LICENSE.txt file in the root directory
+# of this source tree or at https://www.apache.org/licenses/LICENSE-2.0.
+#
+# Any modifications or derivative works of this code must retain this
+# copyright notice, and modified files need to carry a notice indicating
+# that they have been altered from the originals.
+
+FROM python:3.12-slim
+
+WORKDIR /workspace
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    rustc \
+    cargo \
+    git \
+    vim \
+    curl \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy source code
+COPY . .
+
+# Set environment
+ENV QISKIT_BUILD_PROFILE=release
+ENV RUST_BACKTRACE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install Python build dependencies and core packages
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install setuptools-rust && \
+    pip install -e . && \
+    pip install tox pytest pytest-cov 2>/dev/null || true
+
+# Default command
+CMD ["/bin/bash"]
