@@ -3563,20 +3563,16 @@ fn for_each_symbol_use_in_control_flow(
 ) -> Result<(), CircuitDataError> {
     match cf {
         ControlFlowView::ForLoop {
-            loop_param,
+            loop_param: _,
             body,
             collection: _,
         } => {
-            // The loop param is technically a parameter in Python land at `params[1]`.
-            if let Some(symbol) = loop_param {
-                action(
-                    symbol,
-                    ParameterUse::Index {
-                        instruction: instruction_index,
-                        parameter: 1,
-                    },
-                )?;
-            }
+            // NOTE: do NOT treat the loop iteration parameter itself as an
+            // outbound/assignable parameter. The loop parameter is bound by
+            // the ForLoop construct at runtime and should not be tracked as a
+            // top-level parameter use. Only parameters appearing inside the
+            // loop body are considered external/assignable by the outer
+            // circuit, and thus are tracked below.
             // The body is at `params[2]`.
             let usage = ParameterUse::Index {
                 instruction: instruction_index,
