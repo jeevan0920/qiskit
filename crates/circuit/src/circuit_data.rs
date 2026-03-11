@@ -12,6 +12,7 @@
 
 use std::fmt::Debug;
 use std::hash::{Hash, RandomState};
+use std::io::Write;
 #[cfg(feature = "cache_pygates")]
 use std::sync::OnceLock;
 
@@ -3220,9 +3221,15 @@ impl CircuitData {
     ///   function to work. If they are not this will corrupt the circuit.
     pub fn push(&mut self, packed: PackedInstruction) -> Result<(), CircuitDataError> {
         let new_index = self.data.len();
+        let is_control_flow = matches!(packed.op.view(), OperationRef::ControlFlow(_));
         self.data.push(packed);
         self.track_instruction_blocks(new_index);
-        self.track_instruction_parameters(new_index)
+        self.track_instruction_parameters(new_index)?;
+        if is_control_flow {
+            eprintln!("[RUST push] PackedOperation contents:\n{:#?}", self.data.last().unwrap().op.view());
+            eprintln!("[RUST push] CircuitData after pushing ControlFlow op:\n{:#?}", self);
+        }
+        Ok(())
     }
 
     /// Add a param to the current global phase of the circuit

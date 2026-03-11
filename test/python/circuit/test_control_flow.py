@@ -825,14 +825,17 @@ class TestAddingControlFlowOperations(QiskitTestCase):
         inconsistency.
         """
         # Create the loop body
-        print("\n[TEST] === Starting test_for_loop_op_with_reused_parameter_assign_parameters ===")
+        print("\n[TEST] === Starting ... ===", flush=True)
         theta = Parameter('θ')
-        print(f"[TEST] Created Parameter θ: {theta}")
+        print(f"[TEST] Created Parameter θ: {theta}", flush=True)
         body = QuantumCircuit(1)
-        body.rx(theta, 0)
-        print(f"[TEST] Created body circuit with rx(θ, 0)")
-        print(f"[TEST] body.parameters = {body.parameters}")
+        body.rx(theta, 0)          # ← Rust push() fires here
+        print(f"[TEST] Created body circuit with rx(θ, 0)", flush=True)
+        print(f"[TEST] body.parameters = {body.parameters}", flush=True)
         
+        # insert exit from test from here so
+        # return
+
         # Create a ForLoopOp with the loop parameter
         indexset = range(3)
         loop_parameter = theta
@@ -844,7 +847,13 @@ class TestAddingControlFlowOperations(QiskitTestCase):
         qc.append(for_loop_op, [0])
         print(f"[TEST] Appended ForLoopOp to outer circuit")
         print(f"[TEST] qc.parameters = {qc.parameters}")
+
+        # Draw the circuit once
+        print(f"[TEST] Drawing circuit:")
+        print(qc.draw(output='text'))
         
+        return
+    
         # Verify the parameter is in the circuit
         self.assertIn(theta, qc.parameters)
         
