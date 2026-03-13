@@ -2882,46 +2882,28 @@ impl CircuitData {
                             }
                         } else if let OperationRef::ControlFlow(op) = previous_op.view() {
                             let blocks = self.data[instruction].blocks_view();
-                            
-                            // Check if this is a ForLoop and parameter is indexset (0) 
-                            // or loop_parameter (1)
-                            let is_forloop_special_param = match &op.control_flow {
-                                ControlFlow::ForLoop { .. } if parameter == 0 || parameter == 1 => true,
-                                _ => false,
-                            };
-                            
-                            let block_to_edit_opt: Option<Block> = match &op.control_flow {
+                            let block_to_edit = match &op.control_flow {
                                 ControlFlow::BreakLoop => inconsistent(),
                                 ControlFlow::ContinueLoop => inconsistent(),
                                 ControlFlow::ForLoop { .. } => {
                                     match parameter {
                                         // In Python land, the loop body exists at parameter
                                         // position 2.
-                                        0 | 1 => None,
-                                        2 => Some(blocks[0]),
+                                        2 => blocks[0],
                                         _ => inconsistent(),
                                     }
                                 }
                                 // Most control flow instructions use the parameters for
                                 // *just* their blocks.
-                                _ => Some(blocks[parameter]),
+                                _ => blocks[parameter],
                             };
-                            
-                            if let Some(block_to_edit) = block_to_edit_opt {
-                                if !seen_blocks.contains(&block_to_edit) {
-                                    self.blocks[block_to_edit]
-                                        .assign_single_parameter(symbol.clone(), value.as_ref())?;
-                                    seen_blocks.insert(block_to_edit);
-                                }
-                                for uuid in uuids.iter() {
-                                    self.param_table.add_use(*uuid, usage)?
-                                }
-                            } else if is_forloop_special_param {
-                                // For ForLoop parameters 0 and 1, still track usage 
-                                // but don't assign to block
-                                for uuid in uuids.iter() {
-                                    self.param_table.add_use(*uuid, usage)?
-                                }
+                            if !seen_blocks.contains(&block_to_edit) {
+                                self.blocks[block_to_edit]
+                                    .assign_single_parameter(symbol.clone(), value.as_ref())?;
+                                seen_blocks.insert(block_to_edit);
+                            }
+                            for uuid in uuids.iter() {
+                                self.param_table.add_use(*uuid, usage)?
                             }
                             #[cfg(feature = "cache_pygates")]
                             {
