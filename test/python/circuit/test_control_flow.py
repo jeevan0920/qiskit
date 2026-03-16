@@ -813,74 +813,18 @@ class TestAddingControlFlowOperations(QiskitTestCase):
         self.assertEqual(qc.data[0].qubits, tuple(qc.qubits[1:4]))
         self.assertEqual(qc.data[0].clbits, (qc.clbits[1],))
 
-    def test_for_loop_op_with_reused_parameter_assign_parameters(self):
-        """Test for GitHub issue #15657: ForLoopOp with reused Parameter causes
-        'circuit parameter table is inconsistent' on assign_parameters.
-        
-        This test reproduces the bug reported in:
-        https://github.com/Qiskit/qiskit/issues/15657
-        
-        When using ForLoopOp with a reused Parameter and calling assign_parameters()
-        on the outer circuit, it should not raise a RuntimeError about internal
-        inconsistency.
-        """
-        # Create the loop body
-        print("\n[TEST] === Starting ... ===", flush=True)
+    def test_for_loop_loop_parameter_not_in_outer_parameters(self):
+        """A ForLoopOp's loop_parameter must NOT appear in the outer circuit's parameters."""
         theta = Parameter('θ')
-        print(f"[TEST] Created Parameter θ: {theta}", flush=True)
         body = QuantumCircuit(1)
-        body.rx(theta, 0)          # ← Rust push() fires here
-        print(f"[TEST] Created body circuit with rx(θ, 0)", flush=True)
-        print(f"[TEST] body.parameters = {body.parameters}", flush=True)
-        
-        # insert exit from test from here so
-        # return
+        body.rx(theta, 0)
 
-        # Create a ForLoopOp with the loop parameter
-        indexset = range(3)
-        loop_parameter = theta
-        for_loop_op = ForLoopOp(indexset, loop_parameter, body)
-        print(f"[TEST] Created ForLoopOp with loop_parameter=θ")
-        
-        # Append to outer circuit
         qc = QuantumCircuit(1)
-        qc.append(for_loop_op, [0])
-        print(f"[TEST] Appended ForLoopOp to outer circuit")
-        print(f"[TEST] qc.parameters = {qc.parameters}")
+        qc.append(ForLoopOp(range(3), theta, body), [0])
 
-        # Draw the circuit once
-        print(f"[TEST] Drawing circuit:")
-        print(qc.draw(output='text'))
-        
-        return
-    
-        # Verify the parameter is in the circuit
-        self.assertIn(theta, qc.parameters)
-        
-        # This should NOT raise:
-        # RuntimeError: internal error: circuit parameter table is inconsistent
-        # 
-        # The expected behavior is either:
-        # 1. assign_parameters should work correctly
-        # 2. Or raise a CLEAR error message explaining the loop parameter cannot be assigned
-        try:
-            print(f"\n[TEST] Calling qc.assign_parameters({{θ: 3.14159/2}}, inplace=False)")
-            result = qc.assign_parameters({theta: 3.14159 / 2}, inplace=False)
-            print(f"[TEST] assign_parameters succeeded!")
-            print(f"[TEST] result.parameters = {result.parameters}")
-            # If it succeeds, verify the parameter was assigned
-            self.assertEqual(len(result.parameters), 0, 
-                           "Expected all parameters to be bound after assignment")
-        except RuntimeError as e:
-            # If it raises, make sure it's a clear error, not internal inconsistency
-            error_msg = str(e)
-            print(f"[TEST] Got RuntimeError: {error_msg}")
-            self.assertNotIn("circuit parameter table is inconsistent", error_msg,
-                           "Got the confusing internal error - this is the BUG we need to fix!")
-        except Exception as e:
-            # Any other exception is acceptable for now (e.g., CircuitError)
-            print(f"[TEST] Got Exception: {type(e).__name__}: {e}")
-            pass
+        self.assertNotIn(theta, qc.parameters)
+        with self.assertRaisesRegex(CircuitError, r"not present in the circuit"):
+            qc.assign_parameters({theta: math.pi / 2}, inplace=False)
 
     @idata(CONDITION_PARAMETRISATION)
     def test_appending_if_else_op(self, condition):
