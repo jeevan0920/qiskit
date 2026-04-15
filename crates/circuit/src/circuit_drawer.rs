@@ -204,6 +204,7 @@ impl WireInputElement<'_> {
 #[derive(Clone, Debug, Copy)]
 enum OnWireElement<'a> {
     Control(&'a PackedInstruction),
+    CPhaseEndpoint(&'a PackedInstruction),
     Swap(&'a PackedInstruction),
     Barrier,
     Reset,
@@ -365,8 +366,7 @@ impl<'a> VisualizationLayer<'a> {
             | StandardGate::CCX
             | StandardGate::CCZ
             | StandardGate::C3X
-            | StandardGate::C3SX
-            | StandardGate::CPhase => {
+            | StandardGate::C3SX => {
                 self.0[qargs.last().unwrap().index()] =
                     VisualizationElement::Boxed(BoxedElement::Single(inst));
                 if gate.num_ctrl_qubits() > 0 {
@@ -378,6 +378,16 @@ impl<'a> VisualizationLayer<'a> {
                             .map(|q| q.index())
                             .collect(),
                     );
+                }
+
+                let vert_lines = (minima..=maxima)
+                    .filter(|idx| !(qargs.iter().map(|q| q.0 as usize)).contains(idx));
+                self.add_vertical_lines(vert_lines, inst);
+            }
+            StandardGate::CPhase => {
+                for q in qargs {
+                    self.0[q.index()] =
+                        VisualizationElement::DirectOnWire(OnWireElement::CPhaseEndpoint(inst));
                 }
 
                 let vert_lines = (minima..=maxima)
@@ -598,6 +608,7 @@ impl Debug for VisualizationMatrix<'_> {
                     VisualizationElement::DirectOnWire(on_wire) => match on_wire {
                         OnWireElement::Barrier => "░",
                         OnWireElement::Control(_) => "■",
+                        OnWireElement::CPhaseEndpoint(_) => "■",
                         OnWireElement::Reset => "|0>",
                         OnWireElement::Swap(_) => "x",
                     },
@@ -616,6 +627,7 @@ struct TextWireElement {
     top: String,
     mid: String,
     bot: String,
+    suppress_top_if_empty: bool,
 }
 
 impl Debug for TextWireElement {
@@ -946,6 +958,7 @@ impl TextDrawer {
                 }
             }
             VisualizationElement::DirectOnWire(on_wire) => {
+                let mut suppress_top_if_empty = false;
                 let (wire_top, wire_symbol, wire_bot) = match on_wire {
                     OnWireElement::Control(inst) => {
                         let (minima, maxima) =
@@ -961,6 +974,33 @@ impl TextDrawer {
                                 " ".to_string()
                             } else {
                                 CONNECTING_WIRE.to_string()
+                            },
+                        )
+                    }
+                    OnWireElement::CPhaseEndpoint(inst) => {
+                        let qargs = circuit.get_qargs(inst.qubits);
+                        let (minima, _) = get_instruction_range(qargs, &[], 0);
+                        let label = Self::get_label(inst);
+                        let width = label.width() + 3;
+                        let right_pad = width - 2;
+                        suppress_top_if_empty = true;
+                        (
+                            " ".repeat(width),
+                            format!(
+                                "{}{}{}",
+                                Q_WIRE,
+                                BULLET,
+                                Q_WIRE.to_string().repeat(right_pad)
+                            ),
+                            if ind == minima {
+                                format!(
+                                    " {}{}{}",
+                                    CONNECTING_WIRE,
+                                    label,
+                                    " ".repeat(width - label.width() - 2)
+                                )
+                            } else {
+                                " ".repeat(width)
                             },
                         )
                     }
@@ -991,9 +1031,21 @@ impl TextDrawer {
                     }
                 };
 
-                top = format!(" {} ", wire_top);
-                mid = format!("{}{}{}", Q_WIRE, wire_symbol, Q_WIRE);
-                bot = format!(" {} ", wire_bot);
+                if matches!(on_wire, OnWireElement::CPhaseEndpoint(_)) {
+                    top = wire_top;
+                    mid = wire_symbol;
+                    bot = wire_bot;
+                } else {
+                    top = format!(" {} ", wire_top);
+                    mid = format!("{}{}{}", Q_WIRE, wire_symbol, Q_WIRE);
+                    bot = format!(" {} ", wire_bot);
+                }
+                return TextWireElement {
+                    top,
+                    mid,
+                    bot,
+                    suppress_top_if_empty,
+                };
             }
             VisualizationElement::Input(input) => {
                 let input_name = input.get_name(circuit).unwrap_or_else(|| match input {
@@ -1045,6 +1097,34 @@ impl TextDrawer {
                         .to_string();
                     }
                 } else {
+                    if inst.op.try_standard_gate() == Some(StandardGate::CPhase) {
+                        let label = Self::get_label(inst);
+                        let width = label.width() + 3;
+                        let right_pad = width - 2;
+                        top = " ".repeat(width);
+                        bot = format!(
+                            "{}{}{}",
+                            " ",
+                            CONNECTING_WIRE,
+                            " ".repeat(right_pad)
+                        );
+                        mid = format!(
+                            "{}{}{}",
+                            Q_WIRE,
+                            if ind < circuit.num_qubits() {
+                                Q_Q_CROSSED_WIRE
+                            } else {
+                                Q_CL_CROSSED_WIRE
+                            },
+                            Q_WIRE.to_string().repeat(right_pad)
+                        );
+                        return TextWireElement {
+                            top,
+                            mid,
+                            bot,
+                            suppress_top_if_empty: true,
+                        };
+                    }
                     top = CONNECTING_WIRE.to_string();
                     bot = CONNECTING_WIRE.to_string();
                     mid = {
@@ -1070,7 +1150,12 @@ impl TextDrawer {
                 .to_string();
             }
         };
-        TextWireElement { top, mid, bot }
+        TextWireElement {
+            top,
+            mid,
+            bot,
+            suppress_top_if_empty: false,
+        }
     }
 
     fn draw(&self, mergewires: bool, fold: usize) -> String {
@@ -1100,8 +1185,10 @@ impl TextDrawer {
         let mut output = String::new();
 
         let mut wire_strings: Vec<String> = Vec::new();
+        let mut suppress_empty_top_flags: Vec<bool> = Vec::new();
         for (start, end) in ranges {
             wire_strings.clear();
+            suppress_empty_top_flags.clear();
 
             for wire in &self.wires {
                 let top_line: String = wire[start..end]
@@ -1119,6 +1206,11 @@ impl TextDrawer {
                     .map(|elem| elem.bot.clone())
                     .collect::<Vec<String>>()
                     .join("");
+                suppress_empty_top_flags.push(
+                    wire[start..end]
+                        .iter()
+                        .all(|elem| elem.suppress_top_if_empty),
+                );
                 wire_strings.push(format!(
                     "{}{}{}{}",
                     if start > 1 { "«" } else { "" },
@@ -1142,7 +1234,12 @@ impl TextDrawer {
                 ));
             }
             for wire_idx in 0..wire_strings.len() {
-                if mergewires && wire_idx % 3 == 2 && wire_idx < wire_strings.len() - 3 {
+                    if wire_idx % 3 == 0
+                    && suppress_empty_top_flags[wire_idx / 3]
+                    && wire_strings[wire_idx].trim().is_empty()
+                {
+                    continue;
+                } else if mergewires && wire_idx % 3 == 2 && wire_idx < wire_strings.len() - 3 {
                     // Merge the bot_line of the this wire with the top_line of the next wire
                     let merged_line =
                         Self::merge_lines(&wire_strings[wire_idx], &wire_strings[wire_idx + 1]);
@@ -1270,7 +1367,7 @@ c1: 2/══════════
 
 c2: 2/══════════
 ";
-        assert_eq!(result, expected.trim_start_matches("\n"));
+        assert_eq!(result, expected);
     }
 
     #[cfg(not(miri))]
@@ -1293,7 +1390,7 @@ c2_0: ══════════
 
 c2_1: ══════════
 ";
-        assert_eq!(result, expected.trim_start_matches("\n"));
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -1334,7 +1431,7 @@ q: ┤ H ├┤ M ├
           ║
 c: ═══════╩══
 ";
-        assert_eq!(result, expected.trim_start_matches("\n"));
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -1389,7 +1486,7 @@ cr_0: ═════
 
 cr_1: ═════
 ";
-        assert_eq!(result, expected.trim_start_matches("\n"));
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -1652,21 +1749,21 @@ q_3: ┤ X ├┤ R(3.141,3.141) ├────┤ S ├─────┤ T �
                                                                                     »
 q_4: ───────────────────────────────────────────────────────────────────────────────»
                                                                                     »
-«                                                                                       »
-«q_0: ──■───────────────X─────────────────────■───────────────────────────■─────────────»
-«       │               │                     │                           │             »
-«     ┌─┴─┐┌───────┐    │    ┌─────────┐┌─────┴─────┐                   ┌─┴─┐           »
-«q_1: ┤ Z ├┤0  Dcx ├────X────┤0  Iswap ├┤ Rx(3.141) ├────────■──────────┤ S ├───────■───»
-«     └───┘│       │         │         │└───────────┘        │          └───┘       │   »
-«          │       │┌───────┐│         │               ┌─────┴─────┐             ┌──┴──┐»
-«q_2: ──■──┤1      ├┤0  Ecr ├┤1        ├──────■────────┤ Ry(3.141) ├──────■──────┤ Sdg ├»
-«       │  └───────┘│       │└─────────┘      │P(3.141)└───────────┘      │      └─────┘»
-«     ┌─┴─┐         │       │                 │                     ┌─────┴─────┐       »
-«q_3: ┤ Y ├─────────┤1      ├─────────────────■─────────────────────┤ Rz(3.141) ├───────»
-«     └───┘         └───────┘                                       └───────────┘       »
-«                                                                                       »
-«q_4: ──────────────────────────────────────────────────────────────────────────────────»
-«                                                                                       »
+«                                                                                     »
+«q_0: ──■───────────────X─────────────────────■─────────────────────────■─────────────»
+«       │               │                     │                         │             »
+«     ┌─┴─┐┌───────┐    │    ┌─────────┐┌─────┴─────┐                 ┌─┴─┐           »
+«q_1: ┤ Z ├┤0  Dcx ├────X────┤0  Iswap ├┤ Rx(3.141) ├──────■──────────┤ S ├───────■───»
+«     └───┘│       │         │         │└───────────┘      │          └───┘       │   »
+«          │       │┌───────┐│         │             ┌─────┴─────┐             ┌──┴──┐»
+«q_2: ──■──┤1      ├┤0  Ecr ├┤1        ├──■──────────┤ Ry(3.141) ├──────■──────┤ Sdg ├»
+«       │  └───────┘│       │└─────────┘  │P(3.141)  └───────────┘      │      └─────┘»
+«     ┌─┴─┐         │       │                                     ┌─────┴─────┐       »
+«q_3: ┤ Y ├─────────┤1      ├─────────────■───────────────────────┤ Rz(3.141) ├───────»
+«     └───┘         └───────┘                                     └───────────┘       »
+«                                                                                     »
+«q_4: ────────────────────────────────────────────────────────────────────────────────»
+«                                                                                     »
 «                                                     ┌──────────────┐     »
 «q_0: ───────────────■────────────────────────────────┤0  Rxx(3.141) ├─────»
 «                    │                                │              │     »
@@ -1922,7 +2019,7 @@ c_3: ═════════════════════════
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
-
+ 
     #[test]
     fn test_unicode() {
         let qubits = vec![
@@ -2021,9 +2118,9 @@ q_1: ┤ Ry(🎩) ├┤1          ├┤ 💶🔉(🎩) ├┤1           ├�
 
         let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
         let expected = "
-q_0: ─■────────
+q_0: ─■───────
       │P(0.5)
-q_1: ─■────────
+q_1: ─■───────
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
@@ -2050,11 +2147,11 @@ q_1: ─■────────
 
         let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
         let expected = "
-q_0: ─■────────
+q_0: ─■───────
       │P(0.5)
-q_1: ─┼────────
+q_1: ─┼───────
       │
-q_2: ─■────────
+q_2: ─■───────
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
@@ -2080,9 +2177,9 @@ q_2: ─■────────
 
         let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
         let expected = "
-q_0: ─■────────
+q_0: ─■───────
       │P(0.5)
-q_1: ─■────────
+q_1: ─■───────
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
@@ -2109,9 +2206,9 @@ q_1: ─■────────
 
         let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
         let expected = "
-q_0: ─■────
+q_0: ─■─────
       │P(θ)
-q_1: ─■────
+q_1: ─■─────
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
