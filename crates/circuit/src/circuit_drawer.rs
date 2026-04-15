@@ -719,6 +719,12 @@ impl Index<usize> for TextDrawer {
 }
 
 impl TextDrawer {
+    fn is_suppressible_top_row(row: &str) -> bool {
+        row.chars()
+            .filter(|ch| !matches!(ch, ' ' | '«' | '»'))
+            .all(|ch| ch == CONNECTING_WIRE)
+    }
+
     fn from_visualization_matrix(vis_mat: &VisualizationMatrix, cregbundle: bool) -> Self {
         let mut text_drawer = TextDrawer {
             wires: vec![Vec::new(); vis_mat.num_wires()],
@@ -979,13 +985,21 @@ impl TextDrawer {
                     }
                     OnWireElement::CPhaseEndpoint(inst) => {
                         let qargs = circuit.get_qargs(inst.qubits);
-                        let (minima, _) = get_instruction_range(qargs, &[], 0);
+                        let (minima, maxima) = get_instruction_range(qargs, &[], 0);
                         let label = Self::get_label(inst);
                         let width = label.width() + 3;
                         let right_pad = width - 2;
                         suppress_top_if_empty = true;
                         (
-                            " ".repeat(width),
+                            if ind == maxima {
+                                format!(
+                                    " {}{}",
+                                    CONNECTING_WIRE,
+                                    " ".repeat(width - 2)
+                                )
+                            } else {
+                                " ".repeat(width)
+                            },
                             format!(
                                 "{}{}{}",
                                 Q_WIRE,
@@ -1234,9 +1248,9 @@ impl TextDrawer {
                 ));
             }
             for wire_idx in 0..wire_strings.len() {
-                    if wire_idx % 3 == 0
+                if wire_idx % 3 == 0
                     && suppress_empty_top_flags[wire_idx / 3]
-                    && wire_strings[wire_idx].trim().is_empty()
+                    && Self::is_suppressible_top_row(&wire_strings[wire_idx])
                 {
                     continue;
                 } else if mergewires && wire_idx % 3 == 2 && wire_idx < wire_strings.len() - 3 {
@@ -1367,7 +1381,7 @@ c1: 2/══════════
 
 c2: 2/══════════
 ";
-        assert_eq!(result, expected);
+        assert_eq!(result, expected.trim_start_matches("\n"));
     }
 
     #[cfg(not(miri))]
@@ -1390,7 +1404,7 @@ c2_0: ══════════
 
 c2_1: ══════════
 ";
-        assert_eq!(result, expected);
+        assert_eq!(result, expected.trim_start_matches("\n"));
     }
 
     #[test]
@@ -1431,7 +1445,7 @@ q: ┤ H ├┤ M ├
           ║
 c: ═══════╩══
 ";
-        assert_eq!(result, expected);
+        assert_eq!(result, expected.trim_start_matches("\n"));
     }
 
     #[test]
@@ -1486,7 +1500,7 @@ cr_0: ═════
 
 cr_1: ═════
 ";
-        assert_eq!(result, expected);
+        assert_eq!(result, expected.trim_start_matches("\n"));
     }
 
     #[test]
@@ -1758,7 +1772,7 @@ q_4: ─────────────────────────
 «          │       │┌───────┐│         │             ┌─────┴─────┐             ┌──┴──┐»
 «q_2: ──■──┤1      ├┤0  Ecr ├┤1        ├──■──────────┤ Ry(3.141) ├──────■──────┤ Sdg ├»
 «       │  └───────┘│       │└─────────┘  │P(3.141)  └───────────┘      │      └─────┘»
-«     ┌─┴─┐         │       │                                     ┌─────┴─────┐       »
+«     ┌─┴─┐         │       │             │                       ┌─────┴─────┐       »
 «q_3: ┤ Y ├─────────┤1      ├─────────────■───────────────────────┤ Rz(3.141) ├───────»
 «     └───┘         └───────┘                                     └───────────┘       »
 «                                                                                     »
