@@ -204,6 +204,9 @@ impl WireInputElement<'_> {
 #[derive(Clone, Debug, Copy)]
 enum OnWireElement<'a> {
     Control(&'a PackedInstruction),
+    // Without a dedicated variant we cannot distinguish "bullet endpoint that owns the phase
+    // label" from a normal control bullet
+    CPhaseEndpoint(&'a PackedInstruction),
     Swap(&'a PackedInstruction),
     Barrier,
     Reset,
@@ -365,8 +368,7 @@ impl<'a> VisualizationLayer<'a> {
             | StandardGate::CCX
             | StandardGate::CCZ
             | StandardGate::C3X
-            | StandardGate::C3SX
-            | StandardGate::CPhase => {
+            | StandardGate::C3SX => {
                 self.0[qargs.last().unwrap().index()] =
                     VisualizationElement::Boxed(BoxedElement::Single(inst));
                 if gate.num_ctrl_qubits() > 0 {
@@ -378,6 +380,16 @@ impl<'a> VisualizationLayer<'a> {
                             .map(|q| q.index())
                             .collect(),
                     );
+                }
+
+                let vert_lines = (minima..=maxima)
+                    .filter(|idx| !(qargs.iter().map(|q| q.0 as usize)).contains(idx));
+                self.add_vertical_lines(vert_lines, inst);
+            }
+            StandardGate::CPhase => {
+                for q in qargs {
+                    self.0[q.index()] =
+                        VisualizationElement::DirectOnWire(OnWireElement::CPhaseEndpoint(inst));
                 }
 
                 let vert_lines = (minima..=maxima)
@@ -598,6 +610,7 @@ impl Debug for VisualizationMatrix<'_> {
                     VisualizationElement::DirectOnWire(on_wire) => match on_wire {
                         OnWireElement::Barrier => "░",
                         OnWireElement::Control(_) => "■",
+                        OnWireElement::CPhaseEndpoint(_) => "■",
                         OnWireElement::Reset => "|0>",
                         OnWireElement::Swap(_) => "x",
                     },
@@ -964,6 +977,44 @@ impl TextDrawer {
                             },
                         )
                     }
+                    OnWireElement::CPhaseEndpoint(inst) => {
+                        // A CPhase endpoint owns the horizontal space for the connector label.
+                        // We intentionally widen the endpoint element so the text is carried inline:
+                        // q_0: ─■───────
+                        //       │P(0.5)
+                        // q_1: ─■───────
+                        // If we reused the normal 3-character bullet element ("─■─"), the label would
+                        // have nowhere to live. The drawer would either clip it, misalign later layers
+                        let qargs = circuit.get_qargs(inst.qubits);
+                        let (minima, maxima) = get_instruction_range(qargs, &[], 0);
+                        let label = Self::get_label(inst);
+                        let width = label.width() + 3;
+                        let right_pad = width - 2;
+
+                        return TextWireElement {
+                            top: if ind == maxima {
+                                format!(" {}{}", CONNECTING_WIRE, " ".repeat(width - 2))
+                            } else {
+                                " ".repeat(width)
+                            },
+                            mid: format!(
+                                "{}{}{}",
+                                Q_WIRE,
+                                BULLET,
+                                Q_WIRE.to_string().repeat(right_pad)
+                            ),
+                            bot: if ind == minima {
+                                format!(
+                                    " {}{}{}",
+                                    CONNECTING_WIRE,
+                                    label,
+                                    " ".repeat(width - label.width() - 2)
+                                )
+                            } else {
+                                " ".repeat(width)
+                            },
+                        };
+                    }
                     OnWireElement::Swap(inst) => {
                         let (minima, maxima) =
                             get_instruction_range(circuit.get_qargs(inst.qubits), &[], 0);
@@ -991,9 +1042,21 @@ impl TextDrawer {
                     }
                 };
 
-                top = format!(" {} ", wire_top);
-                mid = format!("{}{}{}", Q_WIRE, wire_symbol, Q_WIRE);
-                bot = format!(" {} ", wire_bot);
+                if matches!(on_wire, OnWireElement::CPhaseEndpoint(_)) {
+                    // The CPhase endpoint already returns a fully laid-out multi-column element.
+                    // Wrapping it again in the generic " {} " / "─{}─" shape would reinsert extra
+                    // padding and destroy the intended picture, for example turning:
+                    // q_0: ─■───────
+                    // into something closer to:
+                    // q_0: ─ ─■─────── ─
+                    top = wire_top;
+                    mid = wire_symbol;
+                    bot = wire_bot;
+                } else {
+                    top = format!(" {} ", wire_top);
+                    mid = format!("{}{}{}", Q_WIRE, wire_symbol, Q_WIRE);
+                    bot = format!(" {} ", wire_bot);
+                }
             }
             VisualizationElement::Input(input) => {
                 let input_name = input.get_name(circuit).unwrap_or_else(|| match input {
@@ -1045,6 +1108,37 @@ impl TextDrawer {
                         .to_string();
                     }
                 } else {
+                    if inst.op.try_standard_gate() == Some(StandardGate::CPhase) {
+                        // Interior connector rows for CPhase must reserve the same width as the endpoint
+                        // row so the connector label remains attached to the first vertical segment.
+                        // Desired non-adjacent rendering:
+                        // q_0: ─■───────
+                        //       │P(0.5)
+                        // q_1: ─┼───────
+                        //       │
+                        // q_2: ─■───────
+                        // Without this special case, the middle row would collapse back to a 1-column
+                        // vertical wire, causing the label to drift or the fold/padding logic to treat
+                        // the connector as narrower than its endpoints.
+                        let label = Self::get_label(inst);
+                        let width = label.width() + 3;
+                        let right_pad = width - 2;
+
+                        return TextWireElement {
+                            top: " ".repeat(width),
+                            mid: format!(
+                                "{}{}{}",
+                                Q_WIRE,
+                                if ind < circuit.num_qubits() {
+                                    Q_Q_CROSSED_WIRE
+                                } else {
+                                    Q_CL_CROSSED_WIRE
+                                },
+                                Q_WIRE.to_string().repeat(right_pad)
+                            ),
+                            bot: format!(" {}{}", CONNECTING_WIRE, " ".repeat(right_pad)),
+                        };
+                    }
                     top = CONNECTING_WIRE.to_string();
                     bot = CONNECTING_WIRE.to_string();
                     mid = {
@@ -1142,6 +1236,46 @@ impl TextDrawer {
                 ));
             }
             for wire_idx in 0..wire_strings.len() {
+                // `wire_strings` is laid out as repeating triplets for each wire:
+                //   0 -> top row of wire 0
+                //   1 -> mid row of wire 0
+                //   2 -> bot row of wire 0
+                //   3 -> top row of wire 1
+                // and so on.
+                //
+                // We want to suppress the synthetic blank spacer row introduced by widened
+                // inline-connector layouts such as CPhase, and that lies in the top row
+                if wire_idx % 3 == 0 {
+                    // suppressible_row checks whether the assembled top row is visually empty (or just a bare vertical wire),
+                    // and `inline_connector_layout` verifies that every element in the segment is one of these
+                    // widened inline-connector shapes. Without this detection, the drawer would emit an extra
+                    // blank spacer row above every folded CPhase segment, making the gate look detached from
+                    // the wires it connects. For example without this 3 qubit CPhase would look like:
+		    //           ← extra
+                    // q_0: ─■───────
+                    //       │P(0.5)
+                    //           ← extra
+                    // q_1: ─┼───────
+                    //       │
+                    //       │   ← extra
+                    // q_2: ─■───────
+                    let row = &wire_strings[wire_idx];
+                    let elements = &self.wires[wire_idx / 3][start..end];
+                    let trimmed = row.trim_matches(' ');
+                    let suppressible_row = trimmed.is_empty()
+                        || trimmed.chars().all(|ch| ch == CONNECTING_WIRE);
+                    let inline_connector_layout = elements.iter().all(|elem| {
+                        elem.width() > 3
+                            && elem.top.width() == elem.mid.width()
+                            && elem.bot.width() == elem.mid.width()
+                            && (elem.mid.contains(BULLET)
+                                || elem.mid.contains(Q_Q_CROSSED_WIRE)
+                                || elem.mid.contains(Q_CL_CROSSED_WIRE))
+                    });
+                    if inline_connector_layout && suppressible_row {
+                        continue;
+                    }
+                }
                 if mergewires && wire_idx % 3 == 2 && wire_idx < wire_strings.len() - 3 {
                     // Merge the bot_line of the this wire with the top_line of the next wire
                     let merged_line =
@@ -1659,11 +1793,11 @@ q_4: ─────────────────────────
 «q_1: ┤ Z ├┤0  Dcx ├────X────┤0  Iswap ├┤ Rx(3.141) ├──────■──────────┤ S ├───────■───»
 «     └───┘│       │         │         │└───────────┘      │          └───┘       │   »
 «          │       │┌───────┐│         │             ┌─────┴─────┐             ┌──┴──┐»
-«q_2: ──■──┤1      ├┤0  Ecr ├┤1        ├──────■──────┤ Ry(3.141) ├──────■──────┤ Sdg ├»
-«       │  └───────┘│       │└─────────┘      │      └───────────┘      │      └─────┘»
-«     ┌─┴─┐         │       │           ┌─────┴─────┐             ┌─────┴─────┐       »
-«q_3: ┤ Y ├─────────┤1      ├───────────┤ P(3.141)  ├─────────────┤ Rz(3.141) ├───────»
-«     └───┘         └───────┘           └───────────┘             └───────────┘       »
+«q_2: ──■──┤1      ├┤0  Ecr ├┤1        ├──■──────────┤ Ry(3.141) ├──────■──────┤ Sdg ├»
+«       │  └───────┘│       │└─────────┘  │P(3.141)  └───────────┘      │      └─────┘»
+«     ┌─┴─┐         │       │             │                       ┌─────┴─────┐       »
+«q_3: ┤ Y ├─────────┤1      ├─────────────■───────────────────────┤ Rz(3.141) ├───────»
+«     └───┘         └───────┘                                     └───────────┘       »
 «                                                                                     »
 «q_4: ────────────────────────────────────────────────────────────────────────────────»
 «                                                                                     »
@@ -1922,7 +2056,7 @@ c_3: ═════════════════════════
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
-
+ 
     #[test]
     fn test_unicode() {
         let qubits = vec![
@@ -1995,6 +2129,158 @@ q_0: ──────────┤0  Rxx(🎩) ├────────�
      ┌────────┐│           │┌──────────┐│            ││          │
 q_1: ┤ Ry(🎩) ├┤1          ├┤ 💶🔉(🎩) ├┤1           ├┤1         ├
      └────────┘└───────────┘└──────────┘└────────────┘└──────────┘
+";
+        assert_eq!(result, expected.trim_start_matches("\n"));
+    }
+
+    #[test]
+    fn test_cphase() {
+        // CPhase should render as two bullets (■) on both qubits, with the gate
+        // label (P(θ)) on the connecting wire between them – not as a box on the
+        // target qubit.
+        let qubits = vec![
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+        ];
+        let mut circuit = CircuitData::new(Some(qubits), None, Param::Float(0.0)).unwrap();
+
+        // Adjacent qubits: q_0 (control) → q_1
+        circuit
+            .push_standard_gate(
+                StandardGate::CPhase,
+                &[Param::Float(0.5)],
+                &[Qubit(0), Qubit(1)],
+            )
+            .unwrap();
+
+        let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
+        let expected = "
+q_0: ─■───────
+      │P(0.5)
+q_1: ─■───────
+";
+        assert_eq!(result, expected.trim_start_matches("\n"));
+    }
+
+    #[test]
+    fn test_cphase_five_qubits() {
+        // CPhase spanning five qubits should keep the label attached to the
+        // connector and continue the vertical line through each intermediate
+        // wire.
+        let qubits = vec![
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+        ];
+        let mut circuit = CircuitData::new(Some(qubits), None, Param::Float(0.0)).unwrap();
+
+        circuit
+            .push_standard_gate(
+                StandardGate::CPhase,
+                &[Param::Float(0.5)],
+                &[Qubit(0), Qubit(4)],
+            )
+            .unwrap();
+
+        let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
+        let expected = "
+q_0: ─■───────
+      │P(0.5)
+q_1: ─┼───────
+      │
+q_2: ─┼───────
+      │
+q_3: ─┼───────
+      │
+q_4: ─■───────
+";
+        assert_eq!(result, expected.trim_start_matches("\n"));
+    }
+
+    #[test]
+    fn test_cphase_three_qubits_reversed_order() {
+        // CPhase on non-adjacent qubits with reversed order should still place
+        // the label on the connector between the endpoints.
+        let qubits = vec![
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+        ];
+        let mut circuit = CircuitData::new(Some(qubits), None, Param::Float(0.0)).unwrap();
+
+        // q_2 → q_0 with q_1 between them.
+        circuit
+            .push_standard_gate(
+                StandardGate::CPhase,
+                &[Param::Float(0.5)],
+                &[Qubit(2), Qubit(0)],
+            )
+            .unwrap();
+
+        let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
+        let expected = "
+q_0: ─■───────
+      │P(0.5)
+q_1: ─┼───────
+      │
+q_2: ─■───────
+";
+        assert_eq!(result, expected.trim_start_matches("\n"));
+    }
+
+    #[test]
+    fn test_cphase_reversed_qubit_order() {
+	// q_1 (control) → q_0 (target): reversed order
+        let qubits = vec![
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+        ];
+        let mut circuit = CircuitData::new(Some(qubits), None, Param::Float(0.0)).unwrap();
+
+        circuit
+            .push_standard_gate(
+                StandardGate::CPhase,
+                &[Param::Float(0.5)],
+                &[Qubit(1), Qubit(0)],
+            )
+            .unwrap();
+
+        let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
+        let expected = "
+q_0: ─■───────
+      │P(0.5)
+q_1: ─■───────
+";
+        assert_eq!(result, expected.trim_start_matches("\n"));
+    }
+
+    #[test]
+    fn test_cphase_parameterized() {
+        // CPhase with a symbolic parameter expression instead of a float.
+        let qubits = vec![
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+        ];
+        let mut circuit = CircuitData::new(Some(qubits), None, Param::Float(0.0)).unwrap();
+        let param = Param::ParameterExpression(Arc::new(ParameterExpression::from_symbol(
+            Symbol::new("θ", None, None),
+        )));
+
+        circuit
+            .push_standard_gate(
+                StandardGate::CPhase,
+                &[param],
+                &[Qubit(0), Qubit(1)],
+            )
+            .unwrap();
+
+        let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
+        let expected = "
+q_0: ─■─────
+      │P(θ)
+q_1: ─■─────
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
