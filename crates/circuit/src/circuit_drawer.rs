@@ -627,7 +627,34 @@ struct TextWireElement {
     top: String,
     mid: String,
     bot: String,
-    suppress_top_if_empty: bool,
+    top_row_policy: TopRowPolicy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TopRowPolicy {
+    AlwaysRender,
+    ElideIfOnlyConnectingWire,
+}
+
+impl TopRowPolicy {
+    fn combine(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::ElideIfOnlyConnectingWire, Self::ElideIfOnlyConnectingWire) => {
+                Self::ElideIfOnlyConnectingWire
+            }
+            _ => Self::AlwaysRender,
+        }
+    }
+
+    fn allows_elision(self, row: &str) -> bool {
+        match self {
+            Self::AlwaysRender => false,
+            Self::ElideIfOnlyConnectingWire => row
+                .chars()
+                .filter(|ch| !matches!(ch, ' ' | '«' | '»'))
+                .all(|ch| ch == CONNECTING_WIRE),
+        }
+    }
 }
 
 impl Debug for TextWireElement {
@@ -719,12 +746,6 @@ impl Index<usize> for TextDrawer {
 }
 
 impl TextDrawer {
-    fn is_suppressible_top_row(row: &str) -> bool {
-        row.chars()
-            .filter(|ch| !matches!(ch, ' ' | '«' | '»'))
-            .all(|ch| ch == CONNECTING_WIRE)
-    }
-
     fn from_visualization_matrix(vis_mat: &VisualizationMatrix, cregbundle: bool) -> Self {
         let mut text_drawer = TextDrawer {
             wires: vec![Vec::new(); vis_mat.num_wires()],
@@ -964,7 +985,7 @@ impl TextDrawer {
                 }
             }
             VisualizationElement::DirectOnWire(on_wire) => {
-                let mut suppress_top_if_empty = false;
+                let mut top_row_policy = TopRowPolicy::AlwaysRender;
                 let (wire_top, wire_symbol, wire_bot) = match on_wire {
                     OnWireElement::Control(inst) => {
                         let (minima, maxima) =
@@ -989,7 +1010,7 @@ impl TextDrawer {
                         let label = Self::get_label(inst);
                         let width = label.width() + 3;
                         let right_pad = width - 2;
-                        suppress_top_if_empty = true;
+                        top_row_policy = TopRowPolicy::ElideIfOnlyConnectingWire;
                         (
                             if ind == maxima {
                                 format!(
@@ -1058,7 +1079,7 @@ impl TextDrawer {
                     top,
                     mid,
                     bot,
-                    suppress_top_if_empty,
+                    top_row_policy,
                 };
             }
             VisualizationElement::Input(input) => {
@@ -1136,7 +1157,7 @@ impl TextDrawer {
                             top,
                             mid,
                             bot,
-                            suppress_top_if_empty: true,
+                            top_row_policy: TopRowPolicy::ElideIfOnlyConnectingWire,
                         };
                     }
                     top = CONNECTING_WIRE.to_string();
@@ -1168,7 +1189,7 @@ impl TextDrawer {
             top,
             mid,
             bot,
-            suppress_top_if_empty: false,
+            top_row_policy: TopRowPolicy::AlwaysRender,
         }
     }
 
@@ -1199,10 +1220,10 @@ impl TextDrawer {
         let mut output = String::new();
 
         let mut wire_strings: Vec<String> = Vec::new();
-        let mut suppress_empty_top_flags: Vec<bool> = Vec::new();
+        let mut top_row_policies: Vec<TopRowPolicy> = Vec::new();
         for (start, end) in ranges {
             wire_strings.clear();
-            suppress_empty_top_flags.clear();
+            top_row_policies.clear();
 
             for wire in &self.wires {
                 let top_line: String = wire[start..end]
@@ -1220,10 +1241,12 @@ impl TextDrawer {
                     .map(|elem| elem.bot.clone())
                     .collect::<Vec<String>>()
                     .join("");
-                suppress_empty_top_flags.push(
+                top_row_policies.push(
                     wire[start..end]
                         .iter()
-                        .all(|elem| elem.suppress_top_if_empty),
+                        .map(|elem| elem.top_row_policy)
+                        .reduce(TopRowPolicy::combine)
+                        .unwrap_or(TopRowPolicy::AlwaysRender),
                 );
                 wire_strings.push(format!(
                     "{}{}{}{}",
@@ -1249,8 +1272,7 @@ impl TextDrawer {
             }
             for wire_idx in 0..wire_strings.len() {
                 if wire_idx % 3 == 0
-                    && suppress_empty_top_flags[wire_idx / 3]
-                    && Self::is_suppressible_top_row(&wire_strings[wire_idx])
+                    && top_row_policies[wire_idx / 3].allows_elision(&wire_strings[wire_idx])
                 {
                     continue;
                 } else if mergewires && wire_idx % 3 == 2 && wire_idx < wire_strings.len() - 3 {
@@ -2033,7 +2055,7 @@ c_3: ═════════════════════════
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
- 
+
     #[test]
     fn test_unicode() {
         let qubits = vec![
