@@ -627,7 +627,6 @@ struct TextWireElement {
     top: String,
     mid: String,
     bot: String,
-    suppress_top_if_empty: bool,
 }
 
 impl Debug for TextWireElement {
@@ -719,10 +718,76 @@ impl Index<usize> for TextDrawer {
 }
 
 impl TextDrawer {
-    fn is_suppressible_top_row(row: &str) -> bool {
-        row.chars()
-            .filter(|ch| !matches!(ch, ' ' | '«' | '»'))
-            .all(|ch| ch == CONNECTING_WIRE)
+    fn is_suppressible_inline_top_row(row: &str) -> bool {
+        let trimmed = row.trim_matches(' ');
+        trimmed.is_empty() || trimmed.chars().all(|ch| ch == CONNECTING_WIRE)
+    }
+
+    fn uses_inline_connector_layout(elem: &TextWireElement) -> bool {
+        elem.width() > 3
+            && elem.top.width() == elem.mid.width()
+            && elem.bot.width() == elem.mid.width()
+            && (elem.mid.contains(BULLET)
+                || elem.mid.contains(Q_Q_CROSSED_WIRE)
+                || elem.mid.contains(Q_CL_CROSSED_WIRE))
+    }
+
+    fn draw_cphase_endpoint(inst: &PackedInstruction, circuit: &CircuitData, ind: usize) -> TextWireElement {
+        let qargs = circuit.get_qargs(inst.qubits);
+        let (minima, maxima) = get_instruction_range(qargs, &[], 0);
+        let label = Self::get_label(inst);
+        let width = label.width() + 3;
+        let right_pad = width - 2;
+
+        let top = if ind == maxima {
+            format!(" {}{}", CONNECTING_WIRE, " ".repeat(width - 2))
+        } else {
+            " ".repeat(width)
+        };
+        let mid = format!(
+            "{}{}{}",
+            Q_WIRE,
+            BULLET,
+            Q_WIRE.to_string().repeat(right_pad)
+        );
+        let bot = if ind == minima {
+            format!(
+                " {}{}{}",
+                CONNECTING_WIRE,
+                label,
+                " ".repeat(width - label.width() - 2)
+            )
+        } else {
+            " ".repeat(width)
+        };
+
+        TextWireElement { top, mid, bot }
+    }
+
+    fn draw_cphase_vertical_line(inst: &PackedInstruction, circuit: &CircuitData, ind: usize) -> TextWireElement {
+        let label = Self::get_label(inst);
+        let width = label.width() + 3;
+        let right_pad = width - 2;
+
+        let top = " ".repeat(width);
+        let mid = format!(
+            "{}{}{}",
+            Q_WIRE,
+            if ind < circuit.num_qubits() {
+                Q_Q_CROSSED_WIRE
+            } else {
+                Q_CL_CROSSED_WIRE
+            },
+            Q_WIRE.to_string().repeat(right_pad)
+        );
+        let bot = format!(" {}{}", CONNECTING_WIRE, " ".repeat(right_pad));
+
+        TextWireElement { top, mid, bot }
+    }
+
+    fn should_skip_top_row(elements: &[TextWireElement], row: &str) -> bool {
+        elements.iter().all(Self::uses_inline_connector_layout)
+            && Self::is_suppressible_inline_top_row(row)
     }
 
     fn from_visualization_matrix(vis_mat: &VisualizationMatrix, cregbundle: bool) -> Self {
@@ -964,7 +1029,6 @@ impl TextDrawer {
                 }
             }
             VisualizationElement::DirectOnWire(on_wire) => {
-                let mut suppress_top_if_empty = false;
                 let (wire_top, wire_symbol, wire_bot) = match on_wire {
                     OnWireElement::Control(inst) => {
                         let (minima, maxima) =
@@ -984,39 +1048,7 @@ impl TextDrawer {
                         )
                     }
                     OnWireElement::CPhaseEndpoint(inst) => {
-                        let qargs = circuit.get_qargs(inst.qubits);
-                        let (minima, maxima) = get_instruction_range(qargs, &[], 0);
-                        let label = Self::get_label(inst);
-                        let width = label.width() + 3;
-                        let right_pad = width - 2;
-                        suppress_top_if_empty = true;
-                        (
-                            if ind == maxima {
-                                format!(
-                                    " {}{}",
-                                    CONNECTING_WIRE,
-                                    " ".repeat(width - 2)
-                                )
-                            } else {
-                                " ".repeat(width)
-                            },
-                            format!(
-                                "{}{}{}",
-                                Q_WIRE,
-                                BULLET,
-                                Q_WIRE.to_string().repeat(right_pad)
-                            ),
-                            if ind == minima {
-                                format!(
-                                    " {}{}{}",
-                                    CONNECTING_WIRE,
-                                    label,
-                                    " ".repeat(width - label.width() - 2)
-                                )
-                            } else {
-                                " ".repeat(width)
-                            },
-                        )
+                        return Self::draw_cphase_endpoint(inst, circuit, ind);
                     }
                     OnWireElement::Swap(inst) => {
                         let (minima, maxima) =
@@ -1054,12 +1086,7 @@ impl TextDrawer {
                     mid = format!("{}{}{}", Q_WIRE, wire_symbol, Q_WIRE);
                     bot = format!(" {} ", wire_bot);
                 }
-                return TextWireElement {
-                    top,
-                    mid,
-                    bot,
-                    suppress_top_if_empty,
-                };
+                return TextWireElement { top, mid, bot };
             }
             VisualizationElement::Input(input) => {
                 let input_name = input.get_name(circuit).unwrap_or_else(|| match input {
@@ -1112,32 +1139,7 @@ impl TextDrawer {
                     }
                 } else {
                     if inst.op.try_standard_gate() == Some(StandardGate::CPhase) {
-                        let label = Self::get_label(inst);
-                        let width = label.width() + 3;
-                        let right_pad = width - 2;
-                        top = " ".repeat(width);
-                        bot = format!(
-                            "{}{}{}",
-                            " ",
-                            CONNECTING_WIRE,
-                            " ".repeat(right_pad)
-                        );
-                        mid = format!(
-                            "{}{}{}",
-                            Q_WIRE,
-                            if ind < circuit.num_qubits() {
-                                Q_Q_CROSSED_WIRE
-                            } else {
-                                Q_CL_CROSSED_WIRE
-                            },
-                            Q_WIRE.to_string().repeat(right_pad)
-                        );
-                        return TextWireElement {
-                            top,
-                            mid,
-                            bot,
-                            suppress_top_if_empty: true,
-                        };
+                        return Self::draw_cphase_vertical_line(inst, circuit, ind);
                     }
                     top = CONNECTING_WIRE.to_string();
                     bot = CONNECTING_WIRE.to_string();
@@ -1168,7 +1170,6 @@ impl TextDrawer {
             top,
             mid,
             bot,
-            suppress_top_if_empty: false,
         }
     }
 
@@ -1199,10 +1200,8 @@ impl TextDrawer {
         let mut output = String::new();
 
         let mut wire_strings: Vec<String> = Vec::new();
-        let mut suppress_empty_top_flags: Vec<bool> = Vec::new();
         for (start, end) in ranges {
             wire_strings.clear();
-            suppress_empty_top_flags.clear();
 
             for wire in &self.wires {
                 let top_line: String = wire[start..end]
@@ -1220,11 +1219,6 @@ impl TextDrawer {
                     .map(|elem| elem.bot.clone())
                     .collect::<Vec<String>>()
                     .join("");
-                suppress_empty_top_flags.push(
-                    wire[start..end]
-                        .iter()
-                        .all(|elem| elem.suppress_top_if_empty),
-                );
                 wire_strings.push(format!(
                     "{}{}{}{}",
                     if start > 1 { "«" } else { "" },
@@ -1249,8 +1243,10 @@ impl TextDrawer {
             }
             for wire_idx in 0..wire_strings.len() {
                 if wire_idx % 3 == 0
-                    && suppress_empty_top_flags[wire_idx / 3]
-                    && Self::is_suppressible_top_row(&wire_strings[wire_idx])
+                    && Self::should_skip_top_row(
+                        &self.wires[wire_idx / 3][start..end],
+                        &wire_strings[wire_idx],
+                    )
                 {
                     continue;
                 } else if mergewires && wire_idx % 3 == 2 && wire_idx < wire_strings.len() - 3 {
