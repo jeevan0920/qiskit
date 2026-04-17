@@ -627,6 +627,11 @@ struct TextWireElement {
     top: String,
     mid: String,
     bot: String,
+}
+
+#[derive(Clone)]
+struct RenderedWireCell {
+    text: TextWireElement,
     top_row_policy: TopRowPolicy,
 }
 
@@ -708,6 +713,20 @@ impl TextWireElement {
     }
 }
 
+impl RenderedWireCell {
+    fn width(&self) -> usize {
+        self.text.width()
+    }
+
+    fn pad_wire_left(&mut self, mid_char: char, width: usize) {
+        self.text.pad_wire_left(mid_char, width);
+    }
+
+    fn pad_wire(&mut self, mid_char: char, width: usize) {
+        self.text.pad_wire(mid_char, width);
+    }
+}
+
 pub const Q_WIRE: char = '─';
 pub const C_WIRE: char = '═';
 pub const TOP_CON: char = '┴';
@@ -734,11 +753,11 @@ pub const CL_Q_CROSSED_WIRE: char = '╫';
 /// Textual representation of the circuit
 struct TextDrawer {
     /// The array of textural wire elements corresponding to the visualization elements
-    wires: Vec<Vec<TextWireElement>>,
+    wires: Vec<Vec<RenderedWireCell>>,
 }
 
 impl Index<usize> for TextDrawer {
-    type Output = Vec<TextWireElement>;
+    type Output = Vec<RenderedWireCell>;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.wires[index]
@@ -840,8 +859,8 @@ impl TextDrawer {
         vis_mat: &VisualizationMatrix,
         cregbundle: bool,
         layer_ind: usize,
-    ) -> Vec<TextWireElement> {
-        let mut wires: Vec<TextWireElement> = layer
+    ) -> Vec<RenderedWireCell> {
+        let mut wires: Vec<RenderedWireCell> = layer
             .0
             .iter()
             .enumerate()
@@ -869,7 +888,7 @@ impl TextDrawer {
         vis_mat: &VisualizationMatrix,
         cregbundle: bool,
         ind: usize,
-    ) -> TextWireElement {
+    ) -> RenderedWireCell {
         let circuit = vis_mat.circuit;
         let (top, mid, bot);
         match vis_ele {
@@ -1013,11 +1032,7 @@ impl TextDrawer {
                         top_row_policy = TopRowPolicy::ElideIfOnlyConnectingWire;
                         (
                             if ind == maxima {
-                                format!(
-                                    " {}{}",
-                                    CONNECTING_WIRE,
-                                    " ".repeat(width - 2)
-                                )
+                                format!(" {}{}", CONNECTING_WIRE, " ".repeat(width - 2))
                             } else {
                                 " ".repeat(width)
                             },
@@ -1075,10 +1090,8 @@ impl TextDrawer {
                     mid = format!("{}{}{}", Q_WIRE, wire_symbol, Q_WIRE);
                     bot = format!(" {} ", wire_bot);
                 }
-                return TextWireElement {
-                    top,
-                    mid,
-                    bot,
+                return RenderedWireCell {
+                    text: TextWireElement { top, mid, bot },
                     top_row_policy,
                 };
             }
@@ -1137,12 +1150,7 @@ impl TextDrawer {
                         let width = label.width() + 3;
                         let right_pad = width - 2;
                         top = " ".repeat(width);
-                        bot = format!(
-                            "{}{}{}",
-                            " ",
-                            CONNECTING_WIRE,
-                            " ".repeat(right_pad)
-                        );
+                        bot = format!("{}{}{}", " ", CONNECTING_WIRE, " ".repeat(right_pad));
                         mid = format!(
                             "{}{}{}",
                             Q_WIRE,
@@ -1153,10 +1161,8 @@ impl TextDrawer {
                             },
                             Q_WIRE.to_string().repeat(right_pad)
                         );
-                        return TextWireElement {
-                            top,
-                            mid,
-                            bot,
+                        return RenderedWireCell {
+                            text: TextWireElement { top, mid, bot },
                             top_row_policy: TopRowPolicy::ElideIfOnlyConnectingWire,
                         };
                     }
@@ -1185,10 +1191,8 @@ impl TextDrawer {
                 .to_string();
             }
         };
-        TextWireElement {
-            top,
-            mid,
-            bot,
+        RenderedWireCell {
+            text: TextWireElement { top, mid, bot },
             top_row_policy: TopRowPolicy::AlwaysRender,
         }
     }
@@ -1228,17 +1232,17 @@ impl TextDrawer {
             for wire in &self.wires {
                 let top_line: String = wire[start..end]
                     .iter()
-                    .map(|elem| elem.top.clone())
+                    .map(|elem| elem.text.top.clone())
                     .collect::<Vec<String>>()
                     .join("");
                 let mid_line: String = wire[start..end]
                     .iter()
-                    .map(|elem| elem.mid.clone())
+                    .map(|elem| elem.text.mid.clone())
                     .collect::<Vec<String>>()
                     .join("");
                 let bot_line: String = wire[start..end]
                     .iter()
-                    .map(|elem| elem.bot.clone())
+                    .map(|elem| elem.text.bot.clone())
                     .collect::<Vec<String>>()
                     .join("");
                 top_row_policies.push(
@@ -1251,21 +1255,21 @@ impl TextDrawer {
                 wire_strings.push(format!(
                     "{}{}{}{}",
                     if start > 1 { "«" } else { "" },
-                    wire[0].top,
+                    wire[0].text.top,
                     top_line,
                     if end < num_layers - 1 { "»" } else { "" }
                 ));
                 wire_strings.push(format!(
                     "{}{}{}{}",
                     if start > 1 { "«" } else { "" },
-                    wire[0].mid,
+                    wire[0].text.mid,
                     mid_line,
                     if end < num_layers - 1 { "»" } else { "" }
                 ));
                 wire_strings.push(format!(
                     "{}{}{}{}",
                     if start > 1 { "«" } else { "" },
-                    wire[0].bot,
+                    wire[0].text.bot,
                     bot_line,
                     if end < num_layers - 1 { "»" } else { "" }
                 ));
@@ -2233,11 +2237,7 @@ q_1: ─■───────
         )));
 
         circuit
-            .push_standard_gate(
-                StandardGate::CPhase,
-                &[param],
-                &[Qubit(0), Qubit(1)],
-            )
+            .push_standard_gate(StandardGate::CPhase, &[param], &[Qubit(0), Qubit(1)])
             .unwrap();
 
         let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
