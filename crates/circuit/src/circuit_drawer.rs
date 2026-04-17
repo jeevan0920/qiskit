@@ -1042,7 +1042,6 @@ impl TextDrawer {
                     mid = format!("{}{}{}", Q_WIRE, wire_symbol, Q_WIRE);
                     bot = format!(" {} ", wire_bot);
                 }
-                return TextWireElement { top, mid, bot };
             }
             VisualizationElement::Input(input) => {
                 let input_name = input.get_name(circuit).unwrap_or_else(|| match input {
@@ -1139,11 +1138,7 @@ impl TextDrawer {
                 .to_string();
             }
         };
-        TextWireElement {
-            top,
-            mid,
-            bot,
-        }
+        TextWireElement { top, mid, bot }
     }
 
     fn draw(&self, mergewires: bool, fold: usize) -> String {
