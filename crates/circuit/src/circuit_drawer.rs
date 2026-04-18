@@ -2155,22 +2155,24 @@ q_1: ─■───────
     }
 
     #[test]
-    fn test_cphase_non_adjacent() {
-        // CPhase with a qubit between the two control qubits: the vertical
-        // connecting line should also carry the label.
+    fn test_cphase_five_qubits() {
+        // CPhase spanning five qubits should keep the label attached to the
+        // connector and continue the vertical line through each intermediate
+        // wire.
         let qubits = vec![
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
             ShareableQubit::new_anonymous(),
             ShareableQubit::new_anonymous(),
             ShareableQubit::new_anonymous(),
         ];
         let mut circuit = CircuitData::new(Some(qubits), None, Param::Float(0.0)).unwrap();
 
-        // q_0 and q_2; q_1 is in between
         circuit
             .push_standard_gate(
                 StandardGate::CPhase,
                 &[Param::Float(0.5)],
-                &[Qubit(0), Qubit(2)],
+                &[Qubit(0), Qubit(4)],
             )
             .unwrap();
 
@@ -2180,7 +2182,11 @@ q_0: ─■───────
       │P(0.5)
 q_1: ─┼───────
       │
-q_2: ─■───────
+q_2: ─┼───────
+      │
+q_3: ─┼───────
+      │
+q_4: ─■───────
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
