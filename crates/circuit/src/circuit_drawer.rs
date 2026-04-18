@@ -1250,7 +1250,14 @@ impl TextDrawer {
                     // and `inline_connector_layout` verifies that every element in the segment is one of these
                     // widened inline-connector shapes. Without this detection, the drawer would emit an extra
                     // blank spacer row above every folded CPhase segment, making the gate look detached from
-                    // the wires it connects.
+                    // the wires it connects. For example without this 3 qubit CPhase would look like:
+                    // q_0: ─■───────
+                    //       │P(0.5)
+                    //           ← extra
+                    // q_1: ─┼───────
+                    //       │
+                    //       │   ← extra
+                    // q_2: ─■───────
                     let row = &wire_strings[wire_idx];
                     let elements = &self.wires[wire_idx / 3][start..end];
                     let trimmed = row.trim_matches(' ');
@@ -2187,6 +2194,37 @@ q_2: ─┼───────
 q_3: ─┼───────
       │
 q_4: ─■───────
+";
+        assert_eq!(result, expected.trim_start_matches("\n"));
+    }
+
+    #[test]
+    fn test_cphase_three_qubits_reversed_order() {
+        // CPhase on non-adjacent qubits with reversed order should still place
+        // the label on the connector between the endpoints.
+        let qubits = vec![
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+        ];
+        let mut circuit = CircuitData::new(Some(qubits), None, Param::Float(0.0)).unwrap();
+
+        // q_2 → q_0 with q_1 between them.
+        circuit
+            .push_standard_gate(
+                StandardGate::CPhase,
+                &[Param::Float(0.5)],
+                &[Qubit(2), Qubit(0)],
+            )
+            .unwrap();
+
+        let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
+        let expected = "
+q_0: ─■───────
+      │P(0.5)
+q_1: ─┼───────
+      │
+q_2: ─■───────
 ";
         assert_eq!(result, expected.trim_start_matches("\n"));
     }
