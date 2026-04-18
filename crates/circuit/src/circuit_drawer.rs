@@ -204,19 +204,8 @@ impl WireInputElement<'_> {
 #[derive(Clone, Debug, Copy)]
 enum OnWireElement<'a> {
     Control(&'a PackedInstruction),
-    // CPhase is not drawn like CX/CZ-style controlled gates because there is no boxed target.
-    // Both participating qubits are endpoints, and the phase label lives on the connector.
-    // Required so this:
-    // q_0: ─■───────
-    //       │P(0.5)
-    // q_1: ─■───────
-    // does not regress to the old, misleading shape:
-    // q_0: ─■──
-    //       │
-    // q_1: ┤P ├
     // Without a dedicated variant we cannot distinguish "bullet endpoint that owns the phase
-    // label" from a normal control bullet, so the renderer would keep forcing CPhase into the
-    // boxed-target path used by other controlled gates.
+    // label" from a normal control bullet
     CPhaseEndpoint(&'a PackedInstruction),
     Swap(&'a PackedInstruction),
     Barrier,
@@ -398,20 +387,6 @@ impl<'a> VisualizationLayer<'a> {
                 self.add_vertical_lines(vert_lines, inst);
             }
             StandardGate::CPhase => {
-                // CPhase has two visible endpoints and no boxed target wire.
-                // Example for adjacent qubits:
-                // q_0: ─■───────
-                //       │P(0.5)
-                // q_1: ─■───────
-                // and for non-adjacent qubits:
-                // q_0: ─■───────
-                //       │P(0.5)
-                // q_1: ─┼───────
-                //       │
-                // q_2: ─■───────
-                // If we leave CPhase in the generic controlled-gate branch, the final qubit is
-                // rendered as a boxed single-qubit gate, which incorrectly suggests a control/target
-                // asymmetry and loses the phase label's true placement on the connector.
                 for q in qargs {
                     self.0[q.index()] =
                         VisualizationElement::DirectOnWire(OnWireElement::CPhaseEndpoint(inst));
@@ -635,10 +610,6 @@ impl Debug for VisualizationMatrix<'_> {
                     VisualizationElement::DirectOnWire(on_wire) => match on_wire {
                         OnWireElement::Barrier => "░",
                         OnWireElement::Control(_) => "■",
-                        // Keep debug output aligned with the real rendering: CPhase endpoints are
-                        // bullets on both participating qubits, not a bullet-plus-box mixture.
-                        // Without this, debug traces would still describe the new endpoint type as if
-                        // it were some unrelated placeholder, which makes diagnosing layout bugs harder.
                         OnWireElement::CPhaseEndpoint(_) => "■",
                         OnWireElement::Reset => "|0>",
                         OnWireElement::Swap(_) => "x",
@@ -1013,8 +984,7 @@ impl TextDrawer {
                         //       │P(0.5)
                         // q_1: ─■───────
                         // If we reused the normal 3-character bullet element ("─■─"), the label would
-                        // have nowhere to live. The drawer would either clip it, misalign later layers,
-                        // or force the label into a separate boxed gate that does not exist in the circuit.
+                        // have nowhere to live. The drawer would either clip it, misalign later layers
                         let qargs = circuit.get_qargs(inst.qubits);
                         let (minima, maxima) = get_instruction_range(qargs, &[], 0);
                         let label = Self::get_label(inst);
@@ -1079,7 +1049,6 @@ impl TextDrawer {
                     // q_0: ─■───────
                     // into something closer to:
                     // q_0: ─ ─■─────── ─
-                    // which shifts the connector label and breaks alignment with the vertical line.
                     top = wire_top;
                     mid = wire_symbol;
                     bot = wire_bot;
@@ -1272,24 +1241,12 @@ impl TextDrawer {
                 //   1 -> mid row of wire 0
                 //   2 -> bot row of wire 0
                 //   3 -> top row of wire 1
-                //   4 -> mid row of wire 1
-                //   5 -> bot row of wire 1
                 // and so on.
                 //
                 // We only want to suppress the synthetic blank spacer row introduced by widened
                 // inline-connector layouts such as CPhase, and that row can only be the *top* row
-                // of a wire block. So this condition restricts the suppression check to indices
-                // 0, 3, 6, ... instead of accidentally evaluating the mid or bottom rows, which
-                // contain the actual gate content we must keep.
                 if wire_idx % 3 == 0 {
-                    // Detect the synthetic "top row" produced by widened inline connector elements such as
-                    // CPhase. In the desired rendering:
-                    // q_0: ─■───────
-                    //       │P(0.5)
-                    // q_1: ─■───────
-                    // the first physical row for this folded segment is intentionally blank, because the
-                    // meaningful connector content is carried by the mid and bottom rows. `suppressible_row`
-                    // checks whether the assembled top row is visually empty (or just a bare vertical wire),
+                    // `suppressible_row` checks whether the assembled top row is visually empty (or just a bare vertical wire),
                     // and `inline_connector_layout` verifies that every element in the segment is one of these
                     // widened inline-connector shapes. Without this detection, the drawer would emit an extra
                     // blank spacer row above every folded CPhase segment, making the gate look detached from
@@ -1307,14 +1264,6 @@ impl TextDrawer {
                                 || elem.mid.contains(Q_Q_CROSSED_WIRE)
                                 || elem.mid.contains(Q_CL_CROSSED_WIRE))
                     });
-
-                    // CPhase moves the semantic content onto the mid and bottom rows:
-                    // q_0: ─■───────
-                    //       │P(0.5)
-                    // q_1: ─■───────
-                    // The top row above these widened inline connector elements is intentionally blank.
-                    // If we print it anyway, folded output grows an extra empty spacer row before every
-                    // CPhase segment, making the gate look vertically detached from its own wires.
                     if inline_connector_layout && suppressible_row {
                         continue;
                     }
