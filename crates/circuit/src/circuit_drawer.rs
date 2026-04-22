@@ -209,7 +209,7 @@ enum OnWireElement<'a> {
     CPhaseEndpoint(&'a PackedInstruction),
     Swap(&'a PackedInstruction),
     Barrier,
-    Reset, 
+    Reset,
 }
 
 /// Represent elements that appear in a boxed operation.
@@ -1212,25 +1212,6 @@ impl TextDrawer {
                 ));
             }
             for wire_idx in 0..wire_strings.len() {
-                if wire_idx % 3 == 0 {
-                    let row = &wire_strings[wire_idx];
-                    let elements = &self.wires[wire_idx / 3][start..end];
-                    let trimmed = row.trim_matches(' ');
-                    let suppressible_row =
-                        trimmed.is_empty() || trimmed.chars().all(|ch| ch == CONNECTING_WIRE);
-                    let inline_connector_layout = elements.iter().all(|elem| {
-                        elem.width() > 3
-                            && elem.top.width() == elem.mid.width()
-                            && elem.bot.width() == elem.mid.width()
-                            && (elem.mid.contains(BULLET)
-                                || elem.mid.contains(Q_Q_CROSSED_WIRE)
-                                || elem.mid.contains(Q_CL_CROSSED_WIRE))
-                    });
-                    if inline_connector_layout && suppressible_row {
-                        continue;
-                    }
-                }
-
                 if mergewires && wire_idx % 3 == 2 && wire_idx < wire_strings.len() - 3 {
                     // Merge the bot_line of the this wire with the top_line of the next wire
                     let merged_line =
@@ -1748,11 +1729,11 @@ q_4: ─────────────────────────
 «q_1: ┤ Z ├┤0  Dcx ├────X────┤0  Iswap ├┤ Rx(3.141) ├──────■──────────┤ S ├───────■───»
 «     └───┘│       │         │         │└───────────┘      │          └───┘       │   »
 «          │       │┌───────┐│         │             ┌─────┴─────┐             ┌──┴──┐»
-«q_2: ──■──┤1      ├┤0  Ecr ├┤1        ├──────■──────┤ Ry(3.141) ├──────■──────┤ Sdg ├»
-«       │  └───────┘│       │└─────────┘      │      └───────────┘      │      └─────┘»
-«     ┌─┴─┐         │       │           ┌─────┴─────┐             ┌─────┴─────┐       »
-«q_3: ┤ Y ├─────────┤1      ├───────────┤ P(3.141)  ├─────────────┤ Rz(3.141) ├───────»
-«     └───┘         └───────┘           └───────────┘             └───────────┘       »
+«q_2: ──■──┤1      ├┤0  Ecr ├┤1        ├──■──────────┤ Ry(3.141) ├──────■──────┤ Sdg ├»
+«       │  └───────┘│       │└─────────┘  │P(3.141)  └───────────┘      │      └─────┘»
+«     ┌─┴─┐         │       │             │                       ┌─────┴─────┐       »
+«q_3: ┤ Y ├─────────┤1      ├─────────────■───────────────────────┤ Rz(3.141) ├───────»
+«     └───┘         └───────┘                                     └───────────┘       »
 «                                                                                     »
 «q_4: ────────────────────────────────────────────────────────────────────────────────»
 «                                                                                     »
@@ -2109,9 +2090,10 @@ q_1: ┤ Ry(🎩) ├┤1          ├┤ 💶🔉(🎩) ├┤1           ├�
         let expected = "
 q_0: ─■───────
       │P(0.5)
+      │
 q_1: ─■───────
 ";
-        assert_eq!(result, expected.trim_start_matches("\n"));
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -2135,11 +2117,13 @@ q_1: ─■───────
         let expected = "
 q_0: ─■───────
       │P(0.5)
+      │
 q_1: ─┼───────
+      │
       │
 q_2: ─■───────
 ";
-        assert_eq!(result, expected.trim_start_matches("\n"));
+        assert_eq!(result, expected);
     }
 
     #[test]
