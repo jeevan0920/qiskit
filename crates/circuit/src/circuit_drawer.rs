@@ -2161,4 +2161,72 @@ q_1: ┤ Ry(🎩) ├┤1          ├┤ 💶🔉(🎩) ├┤1           ├�
         println!("{result}");
         println!("=======");
     }
+
+    #[test]
+    #[ignore = "temporary debug printer for reverse-order cphase output"]
+    fn debug_print_reverse_cphase_output() {
+        let qubits = vec![
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+        ];
+        let mut circuit = CircuitData::new(Some(qubits), None, Param::Float(0.0)).unwrap();
+
+        circuit
+            .push_standard_gate(
+                StandardGate::CPhase,
+                &[Param::Float(0.5)],
+                &[Qubit(2), Qubit(0)],
+            )
+            .unwrap();
+
+        let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
+        println!("=======");
+        println!("{result}");
+        println!("=======");
+    }
+
+    #[test]
+    #[ignore = "temporary debug printer for complex mixed-gate output"]
+    fn debug_print_complex_mixed_output() {
+        let qubits = vec![
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+            ShareableQubit::new_anonymous(),
+        ];
+        let mut circuit = CircuitData::new(Some(qubits), None, Param::Float(0.0)).unwrap();
+
+        circuit
+            .push_standard_gate(StandardGate::CX, &[], &[Qubit(0), Qubit(3)])
+            .unwrap();
+        circuit
+            .push_standard_gate(
+                StandardGate::CPhase,
+                &[Param::Float(0.5)],
+                &[Qubit(3), Qubit(1)],
+            )
+            .unwrap();
+        circuit
+            .push_standard_gate(StandardGate::CZ, &[], &[Qubit(0), Qubit(2)])
+            .unwrap();
+        circuit
+            .push_standard_gate(StandardGate::Swap, &[], &[Qubit(1), Qubit(2)])
+            .unwrap();
+        circuit
+            .push_standard_gate(StandardGate::CX, &[], &[Qubit(2), Qubit(3)])
+            .unwrap();
+        circuit
+            .push_standard_gate(
+                StandardGate::CPhase,
+                &[Param::Float(1.25)],
+                &[Qubit(0), Qubit(1)],
+            )
+            .unwrap();
+
+        let result = draw_circuit(&circuit, false, false, Some(100)).unwrap();
+        println!("=======");
+        println!("{result}");
+        println!("=======");
+    }
 }
