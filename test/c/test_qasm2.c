@@ -145,8 +145,8 @@ static int test_strict_requires_version(void) {
 }
 
 /**
- * A valid include path is accepted, while a path that is not valid UTF-8 is rejected with
- * `QkExitCode_CInputError` rather than being silently mangled.
+ * A path is a byte sequence, not text, so it is not required to be valid UTF-8.  (`ctest` does
+ * not run on Windows, where a `char *` path is read as UTF-8.)
  */
 static int test_append_include_path(void) {
     QkOpenQasm2Options *options = qk_openqasm2_options_new();
@@ -155,9 +155,10 @@ static int test_append_include_path(void) {
         qk_openqasm2_options_free(options);
         return EqualityError;
     }
-    // 0xff never appears in well-formed UTF-8, so this path can only be reported as an error.
-    if (qk_openqasm2_options_append_include_path(options, "\xff") != QkExitCode_CInputError) {
-        fprintf(stderr, "%s: a path that is not valid UTF-8 was not an input error\n", __func__);
+    // 0xff never appears in well-formed UTF-8, so this is exactly the path that a UTF-8 check
+    // used to reject.
+    if (qk_openqasm2_options_append_include_path(options, "\xff") != QkExitCode_Success) {
+        fprintf(stderr, "%s: a path that is not valid UTF-8 was rejected\n", __func__);
         qk_openqasm2_options_free(options);
         return EqualityError;
     }

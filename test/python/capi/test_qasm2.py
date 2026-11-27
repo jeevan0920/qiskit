@@ -13,6 +13,8 @@
 """Parity tests between the native OpenQASM 2 importer, reached through the C API, and the
 Python-space bytecode interpreter behind :func:`qiskit.qasm2.loads`."""
 
+import os
+import tempfile
 import unittest
 
 import ddt
@@ -103,3 +105,18 @@ class TestQasm2CParity(QiskitTestCase):
         self.assertEqual(qiskit.qasm2.loads(program), ffi.load_qasm2_from_c(program))
         with self.assertRaises(qiskit.qasm2.QASM2ParseError):
             ffi.load_qasm2_from_c(program, strict=True)
+
+    @unittest.skipIf(os.name != "posix", "non-UTF-8 file names are a POSIX feature")
+    def test_include_resolves_a_non_utf8_directory(self):
+        """An `include` is found inside a directory whose name is not valid UTF-8."""
+        with tempfile.TemporaryDirectory() as base:
+            directory = os.path.join(os.fsencode(base), b"inc-\xff")
+            try:
+                os.mkdir(directory)
+            except OSError as exc:
+                self.skipTest(f"the file system rejects names that are not valid UTF-8: {exc}")
+            with open(os.path.join(directory, b"extra.inc"), "wb") as file:
+                file.write(b"h q[0];\n")
+            program = HEADER + 'qreg q[1];\ninclude "extra.inc";\n'
+            circuit = ffi.load_qasm2_from_c(program, include_path=[directory])
+        self.assertEqual([instruction.operation.name for instruction in circuit.data], ["h"])

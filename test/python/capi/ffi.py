@@ -129,7 +129,7 @@ def transpile_from_c(
 def load_qasm2_from_c(
     program: str,
     strict: bool = False,
-    include_path: Iterable[str | os.PathLike] = (),
+    include_path: Iterable[str | bytes | os.PathLike] = (),
 ) -> qiskit.QuantumCircuit:
     """Load an OpenQASM 2 program through the C API and return it as a Python circuit.
 
@@ -143,12 +143,10 @@ def load_qasm2_from_c(
     options = capi.qk_openqasm2_options_new()
     capi.qk_openqasm2_options_set_strict(options, strict)
     for path in include_path:
-        code = capi.qk_openqasm2_options_append_include_path(
-            options, os.fspath(path).encode("utf-8")
-        )
+        code = capi.qk_openqasm2_options_append_include_path(options, os.fsencode(path))
         if code != capi.QkExitCode.Success.value.value:
             capi.qk_openqasm2_options_free(options)
-            raise ValueError(f"include path is not valid UTF-8: {path!r}")
+            raise ValueError(f"could not append the include path: {path!r}")
     error = ctypes.POINTER(ctypes.c_char)()
     circuit = ctypes.POINTER(capi.QkCircuit)()
     code = capi.qk_openqasm2_load(

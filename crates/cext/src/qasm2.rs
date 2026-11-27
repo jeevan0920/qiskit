@@ -106,11 +106,13 @@ pub unsafe extern "C" fn qk_openqasm2_options_set_strict(
 ///
 /// @param options A handle to the options to modify.
 /// @param path A nul-terminated string giving the directory to search.  The string is copied,
-///     not stored.
+///     not stored.  The bytes are taken to be the native representation of a path: on Unix any
+///     non-nul byte sequence is accepted, while platforms whose paths are natively UTF-16 read
+///     the bytes as UTF-8.
 ///
 /// @return ``QkExitCode_Success`` if the directory was appended,
 ///     ``QkExitCode_NullPointerError`` if ``path`` is null, or ``QkExitCode_CInputError`` if
-///     ``path`` is not valid UTF-8.
+///     ``path`` is not valid UTF-8 on a platform that requires it.
 ///
 /// # Safety
 ///
@@ -125,13 +127,11 @@ pub unsafe extern "C" fn qk_openqasm2_options_append_include_path(
         return ExitCode::NullPointerError;
     }
     // SAFETY: per documentation, `path` points to a nul-terminated string.
-    let Ok(path) = unsafe { CStr::from_ptr(path) }.to_str() else {
+    let Some(path) = util::path_from_c_str(unsafe { CStr::from_ptr(path) }) else {
         return ExitCode::CInputError;
     };
     // SAFETY: per documentation, `options` is a valid handle.
-    unsafe { &mut *options }
-        .include_path
-        .push(PathBuf::from(path));
+    unsafe { &mut *options }.include_path.push(path);
     ExitCode::Success
 }
 
